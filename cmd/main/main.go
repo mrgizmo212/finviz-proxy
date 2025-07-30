@@ -24,6 +24,7 @@ type config struct {
 	EliteLogin bool          `default:"false"`
 	Email      string        `default:""`
 	Password   string        `default:""`
+	APIKey     string        `default:""` // Optional API key for authentication
 }
 
 var (
@@ -151,12 +152,42 @@ func init() {
 	}()
 }
 
+// API Key middleware
+func apiKeyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// If no API key is configured, allow all requests
+		if c.APIKey == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check for API key in header
+		apiKey := r.Header.Get("X-API-Key")
+		if apiKey == "" {
+			apiKey = r.URL.Query().Get("api_key") // Also check query param
+		}
+
+		if apiKey != c.APIKey {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized: Invalid or missing API key"))
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Timeout(c.Timeout))
 	r.Use(middleware.Throttle(c.Throttle))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	
+	// Add API key middleware if configured
+	if c.APIKey != "" {
+		r.Use(apiKeyMiddleware)
+	}
 
 	/*
 		stock screener apis
