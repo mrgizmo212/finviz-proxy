@@ -1,22 +1,21 @@
-FROM golang:1.21-alpine3.18 AS builder
-
-ENV GOPROXY=https://goproxy.cn,direct
+FROM golang:1.24 AS builder
 
 WORKDIR /app
 
-ADD go.mod go.sum /app/
+COPY go.mod go.sum ./
 RUN go mod download
 
-ADD /pkg /app/pkg
-ADD /cmd /app/cmd
+COPY pkg ./pkg
+COPY cmd ./cmd
 
-RUN go build -o main cmd/main/main.go
+RUN CGO_ENABLED=0 go build -o main cmd/main/main.go
 
-FROM alpine:3.18 AS final
+FROM chromedp/headless-shell:145.0.7587.5
 
-RUN apk add --no-cache tzdata
+RUN apt-get update && apt-get install -y tzdata && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
 COPY --from=builder /app/main /app/main
 
-CMD ["/app/main"]
+ENTRYPOINT ["/app/main"]

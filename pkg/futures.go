@@ -3,9 +3,10 @@ package pkg
 import (
 	"context"
 	"encoding/json"
-	"github.com/pkg/errors"
 	"log/slog"
-	"net/http"
+	"time"
+
+	"github.com/chromedp/chromedp"
 )
 
 type FutureQuota struct {
@@ -23,29 +24,62 @@ func FetchAllFutures(ctx context.Context, isElite bool) (map[string]FutureQuota,
 	if isElite {
 		url = "https://elite.finviz.com/api/futures_all.ashx?timeframe=NO"
 	}
-	// request
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+
+	var bodyContent string
+	var err error
+
+	for i := 0; i < 5; i++ {
+		// check if parent context is done
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		// get browser context
+		bCtx, err := GetBrowserCtx()
+		if err != nil {
+			slog.Error("FetchAllFutures get browser context failed", "err", err)
+			return nil, err
+		}
+
+		// create tab
+		tabCtx, cancel := chromedp.NewContext(bCtx)
+
+		// set timeout for this attempt
+		tCtx, tCancel := context.WithTimeout(tabCtx, 30*time.Second)
+
+		slog.Info("FetchAllFutures chromedp start", "url", url)
+		err = chromedp.Run(tCtx,
+			chromedp.Navigate(url),
+			chromedp.Evaluate(`document.body.innerText`, &bodyContent),
+		)
+
+		tCancel()
+		cancel()
+
+		if err == nil && bodyContent != "" {
+			slog.Info("FetchAllFutures chromedp finish", "url", url)
+			break
+		}
+
+		slog.Warn("FetchAllFutures attempt failed", "attempt", i+1, "err", err)
+		time.Sleep(time.Second)
+	}
+
 	if err != nil {
-		slog.Error("FetchAllFutures http new request", "err", err)
+		slog.Error("FetchAllFutures chromedp run failed", "err", err)
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "curl/7.88.1")
-	client := newClient()
-	resp, err := client.Do(req)
-	if err != nil {
-		slog.Error("FetchAllFutures http do", "err", err)
-		return nil, err
+
+	if bodyContent == "" {
+		slog.Error("FetchAllFutures received empty body")
+		return nil, nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		slog.Error("FetchAllFutures status code not ok", "status", resp.StatusCode)
-		return nil, errors.New("FetchAllFutures status code not ok")
-	}
+
 	// unmarshal to map
 	ret := make(map[string]FutureQuota)
-	err = json.NewDecoder(resp.Body).Decode(&ret)
+	err = json.Unmarshal([]byte(bodyContent), &ret)
 	if err != nil {
-		slog.Error("FetchAllFutures json decode response", "err", err)
+		slog.Error("FetchAllFutures json decode response", "err", err, "body", bodyContent)
 		return nil, err
 	}
 	return ret, nil

@@ -2,13 +2,18 @@ package pkg
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_fetchFinvizPage(t *testing.T) {
+	// init chrome allocator
+	_, cancel := InitChromeAllocator(context.Background())
+	defer cancel()
+
 	html, err := fetchFinvizPage(context.Background(), "", false)
 	assert.NoError(t, err)
-	os.WriteFile("screener.ashx", html, 0644)
+	os.WriteFile("screener.html", html, 0644)
 }

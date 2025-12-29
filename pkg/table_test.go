@@ -1,16 +1,18 @@
 package pkg
 
 import (
+	"context"
 	"encoding/json"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func Test_parseTable(t *testing.T) {
-	// read file screener.ashx.html
-	page, err := os.ReadFile("screener.ashx")
+	_, cancel := InitChromeAllocator(context.Background())
+	defer cancel()
+
+	page, err := fetchFinvizPage(context.Background(), "", false)
 	assert.NoError(t, err)
 	table, err := parseTable(page)
 	assert.NoError(t, err)

@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"github.com/go-chi/chi/v5"
-	"github.com/patrickmn/go-cache"
-	"github.com/ppaanngggg/finviz-proxy/pkg"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/patrickmn/go-cache"
+	"github.com/ppaanngggg/finviz-proxy/pkg"
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
@@ -41,6 +42,9 @@ func init() {
 	if err := envconfig.Process("", &c); err != nil {
 		panic(err)
 	}
+	// init chrome allocator
+	pkg.InitChromeAllocator(context.Background())
+
 	// init cache
 	tableCache = cache.New(c.CacheTTL, c.CacheTTL)
 	// elite login
@@ -183,7 +187,7 @@ func main() {
 	r.Use(middleware.Throttle(c.Throttle))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	
+
 	// Add API key middleware if configured
 	if c.APIKey != "" {
 		r.Use(apiKeyMiddleware)

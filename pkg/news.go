@@ -3,13 +3,14 @@ package pkg
 import (
 	"bytes"
 	"context"
-	"github.com/PuerkitoBio/goquery"
-	"github.com/pkg/errors"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/chromedp"
+	"github.com/pkg/errors"
 )
 
 func fetchAllNews(ctx context.Context, isElite bool) ([]byte, error) {
@@ -17,29 +18,57 @@ func fetchAllNews(ctx context.Context, isElite bool) ([]byte, error) {
 	if isElite {
 		url = "https://elite.finviz.com/news.ashx"
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+
+	var html string
+	var err error
+
+	for i := 0; i < 5; i++ {
+		// check if parent context is done
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		// get browser context
+		bCtx, err := GetBrowserCtx()
+		if err != nil {
+			slog.Error("fetchAllNews get browser context failed", "err", err)
+			return nil, err
+		}
+
+		// create tab
+		tabCtx, cancel := chromedp.NewContext(bCtx)
+
+		// set timeout for this attempt
+		tCtx, tCancel := context.WithTimeout(tabCtx, 30*time.Second)
+
+		slog.Info("fetchAllNews chromedp start", "url", url)
+		err = chromedp.Run(tCtx,
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				_, _, _, _, err := page.Navigate(url).Do(ctx)
+				return err
+			}),
+			chromedp.WaitVisible(`.news_time-table`, chromedp.ByQuery),
+			chromedp.OuterHTML(`html`, &html),
+		)
+
+		tCancel()
+		cancel()
+
+		if err == nil && html != "" {
+			slog.Info("fetchAllNews chromedp finish", "url", url)
+			break
+		}
+
+		slog.Warn("fetchAllNews attempt failed", "attempt", i+1, "err", err)
+		time.Sleep(time.Second)
+	}
+
 	if err != nil {
-		slog.Error("fetchAllNews http new request", "err", err)
+		slog.Error("fetchAllNews chromedp run failed", "err", err)
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "curl/7.88.1")
-	client := newClient()
-	resp, err := client.Do(req)
-	if err != nil {
-		slog.Error("fetchAllNews http do", "err", err)
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		slog.Error("fetchAllNews status code not ok", "code", resp.StatusCode)
-		return nil, errors.New("fetchAllNews status code not ok")
-	}
-	page, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Error("fetchAllNews read all http resp body", "err", err)
-		return nil, err
-	}
-	return page, nil
+
+	return []byte(html), nil
 }
 
 type Record struct {
