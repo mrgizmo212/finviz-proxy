@@ -70,46 +70,46 @@ func parseUrlParams(str string) map[string]string {
 }
 
 func parseFilterNameAndDescription(span *goquery.Selection) (name string, description string) {
-	/*
-	   <span class="screener-combo-title"
-	         style="cursor:pointer;"
-	         data-boxover="cssbody=[tooltip_bdy] cssheader=[tooltip_hdr] header=[Exchange] body=[<table width=300><tr><td class='tooltip_tab'>Stock Exchange at which a stock is listed.</td></tr></table>] delay=[500]">
-	       Exchange
-	   </span>
-	*/
-	dataBoxover, exist := span.Attr("data-boxover")
-	if !exist {
-		html, err := span.Html()
-		slog.Warn("data-boxover not found in span", "span", html, "err", err)
+	// Try legacy data-boxover attribute first (key=value pair format).
+	if dataBoxover, exist := span.Attr("data-boxover"); exist {
+		m := parseKeyValuePairs(dataBoxover)
+		name = m["header"]
+		if name == "" {
+			name = strings.TrimSpace(span.Text())
+		}
+		body := m["body"]
+		if body != "" {
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
+			if err == nil {
+				if td := doc.Find("td").First(); td != nil && td.Length() > 0 {
+					description = td.Text()
+				}
+			}
+		}
 		return
 	}
-	m := parseKeyValuePairs(dataBoxover)
-	// set header as name
-	name = m["header"]
-	if name == "" {
-		// if header not found, use span text
-		name = span.Text()
-	}
-	// parse body to get description
-	body := m["body"]
-	if body == "" {
-		slog.Warn("body not found in data-boxover", "data-boxover", dataBoxover)
+
+	// Try data-boxover-html attribute (raw HTML format, e.g. <div><b>Name</b><br>Description</div>).
+	if dataHtml, exist := span.Attr("data-boxover-html"); exist {
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(dataHtml))
+		if err == nil {
+			if b := doc.Find("b").First(); b != nil && b.Length() > 0 {
+				name = strings.TrimSpace(b.Text())
+			}
+			if name != "" {
+				full := strings.TrimSpace(doc.Text())
+				desc := strings.TrimPrefix(full, name)
+				description = strings.TrimSpace(desc)
+			}
+		}
+		if name == "" {
+			name = strings.TrimSpace(span.Text())
+		}
 		return
 	}
-	/*
-		<table width=300><tr><td class='tooltip_tab'>Stock Exchange at which a stock is listed.</td></tr></table>
-	*/
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
-	if err != nil {
-		slog.Error("failed to parse body", "body", body, "err", err)
-		return
-	}
-	td := doc.Find("td").First()
-	if td == nil || td.Length() == 0 {
-		slog.Warn("td not found in body", "body", body)
-		return
-	}
-	description = td.Text()
+
+	// Fallback: use the span text itself.
+	name = strings.TrimSpace(span.Text())
 	return
 }
 
